@@ -12,9 +12,9 @@ use editor::actions::{
 use editor::code_context_menus::{CodeContextMenu, ContextMenuOrigin};
 use editor::{Editor, EditorSettings};
 use gpui::{
-    Action, AnchoredPositionMode, AsyncWindowContext, ClickEvent, Context, Corner, ElementId,
-    Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement, ParentElement, Render,
-    Styled, Subscription, WeakEntity, Window, anchored, deferred, point,
+    Action, AnchoredPositionMode, AsyncWindowContext, ClickEvent, ClipboardItem, Context, Corner,
+    ElementId, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement, ParentElement,
+    Render, Styled, Subscription, WeakEntity, Window, anchored, deferred, point,
 };
 use project::{DisableAiSettings, project_settings::DiagnosticSeverity};
 use search::{BufferSearchBar, buffer_search};
@@ -316,12 +316,16 @@ impl Render for QuickActionBar {
                                     workspace.update_in(cx, |workspace, window, cx| {
                                         match insert_secops_message(workspace, &editor, window, cx) {
                                             Ok(payload) => {
+                                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                                    payload.payload.clone(),
+                                                ));
+
                                                 if payload.truncated {
                                                     workspace.show_toast(
                                                         Toast::new(
                                                             toast_id.clone(),
                                                             format!(
-                                                                "SecOps Scan inserted (truncated to {} KB)",
+                                                                "SecOps Scan copied and inserted (truncated to {} KB)",
                                                                 SECOPS_WARN_BYTES / 1024
                                                             ),
                                                         )
@@ -332,7 +336,7 @@ impl Render for QuickActionBar {
                                                     workspace.show_toast(
                                                         Toast::new(
                                                             toast_id.clone(),
-                                                            "SecOps Scan inserted into chat composer",
+                                                            "SecOps Scan copied and inserted into chat",
                                                         )
                                                         .autohide(),
                                                         cx,
