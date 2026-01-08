@@ -1,38 +1,68 @@
-# Zed
+# Zed (SecOps Edition)
 
-[![Zed](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/zed-industries/zed/main/assets/badge/v0.json)](https://zed.dev)
-[![CI](https://github.com/zed-industries/zed/actions/workflows/run_tests.yml/badge.svg)](https://github.com/zed-industries/zed/actions/workflows/run_tests.yml)
-
-Welcome to Zed, a high-performance, multiplayer code editor from the creators of [Atom](https://github.com/atom/atom) and [Tree-sitter](https://github.com/tree-sitter/tree-sitter).
+Welcome to this custom fork of Zed, which includes the **SecOps Scan** feature for automated security analysis of your code.
 
 ---
 
-### Installation
+### Getting Started
 
-On macOS, Linux, and Windows you can [download Zed directly](https://zed.dev/download) or install Zed via your local package manager ([macOS](https://zed.dev/docs/installation#macos)/[Linux](https://zed.dev/docs/linux#installing-via-a-package-manager)/[Windows](https://zed.dev/docs/windows#package-managers)).
+#### 1. Clone the Repository
+To get started with this project, clone the repository from the main branch:
 
-Other platforms are not yet available:
+```bash
+git clone https://github.com/coding1100/zed-secops-scan.git
+cd zed-secops-scan
+```
 
-- Web ([tracking issue](https://github.com/zed-industries/zed/issues/5396))
+#### 2. Install Dependencies
+Ensure you have the Rust toolchain installed. On Linux, run the following command to install the necessary system dependencies:
 
-### Developing Zed
+```bash
+sudo apt-get update && sudo apt-get install -y \
+  cmake \
+  pkg-config \
+  clang \
+  libasound2-dev \
+  libx11-xcb-dev \
+  libxkbcommon-dev \
+  libxkbcommon-x11-dev
+```
 
-- [Building Zed for macOS](./docs/src/development/macos.md)
-- [Building Zed for Linux](./docs/src/development/linux.md)
-- [Building Zed for Windows](./docs/src/development/windows.md)
+#### 3. Start the Editor
+Run the following command to build and start the Zed editor in debug mode:
+
+```bash
+source $HOME/.cargo/env
+cargo run -p zed --bin zed
+```
+
+---
+
+### New Feature: SecOps Scan
+
+The **SecOps Scan** feature allows you to quickly analyze the security posture of any open file using Zed's AI Agent.
+
+#### Key Functionalities:
+- **One-Click Security Review**: A shield icon appears in the editor toolbar (top-right, next to search).
+- **Auto-Agent Integration**: Automatically opens the Agent panel and creates a new thread if one isn't active.
+- **Payload Generation**: Prepends a specialized security prompt to your file contents.
+- **Safety Handling**: Large files (>200KB) are automatically truncated, and extremely large files (>1MB) are blocked for safety.
+- **Clipboard Sync**: The generated security report prompt is also copied to your clipboard automatically for use in other tools.
+
+#### How to Test:
+1. Open a real file (e.g., `main.py` or `requirements.txt`).
+2. Look for the **Shield Icon** (🛡️) in the top-right toolbar.
+3. Click the icon.
+4. **Observe**:
+   - The Agent panel focuses.
+   - A security analysis prompt and your code are inserted into the chat.
+   - A toast notification confirms the action.
+   - Try pasting (Ctrl+V) in any other text area to verify the payload was copied to your clipboard.
+
+---
 
 ### Contributing
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for ways you can contribute to Zed.
-
-Also... we're hiring! Check out our [jobs](https://zed.dev/jobs) page for open roles.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for general Zed contribution guidelines.
 
 ### Licensing
-
-License information for third party dependencies must be correctly provided for CI to pass.
-
-We use [`cargo-about`](https://github.com/EmbarkStudios/cargo-about) to automatically comply with open source licenses. If CI is failing, check the following:
-
-- Is it showing a `no license specified` error for a crate you've created? If so, add `publish = false` under `[package]` in your crate's Cargo.toml.
-- Is the error `failed to satisfy license requirements` for a dependency? If so, first determine what license the project has and whether this system is sufficient to comply with this license's requirements. If you're unsure, ask a lawyer. Once you've verified that this system is acceptable add the license's SPDX identifier to the `accepted` array in `script/licenses/zed-licenses.toml`.
-- Is `cargo-about` unable to find the license for a dependency? If so, add a clarification field at the end of `script/licenses/zed-licenses.toml`, as specified in the [cargo-about book](https://embarkstudios.github.io/cargo-about/cli/generate/config.html#crate-configuration).
+Zed is licensed under the GPL-3.0-or-later. See [LICENSE-GPL](./LICENSE-GPL) for details.
