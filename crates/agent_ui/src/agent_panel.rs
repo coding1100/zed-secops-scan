@@ -796,7 +796,7 @@ impl AgentPanel {
         );
     }
 
-    fn new_text_thread(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn new_text_thread(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         telemetry::event!("Agent Thread Started", agent = "zed-text");
 
         let context = self

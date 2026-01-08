@@ -344,6 +344,8 @@ pub mod agent {
             ResetOnboarding,
             /// Starts a chat conversation with the agent.
             Chat,
+            /// Inserts the active file into the agent composer for security review.
+            SecOpsScan,
             /// Toggles the language model selector dropdown.
             #[action(deprecated_aliases = ["assistant::ToggleModelSelector", "assistant2::ToggleModelSelector"])]
             ToggleModelSelector,

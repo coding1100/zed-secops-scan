@@ -1,0 +1,61 @@
+---
+alwaysApply: true
+---
+PROJECT CONTEXT
+- This project is a scoped feature addition to the Zed Editor (Rust-based IDE).
+- Goal: add a “SecOps Scan” UI button for open files that sends file contents to the AI chat panel for security analysis.
+- The repository is already cloned and open in the editor.
+
+GENERAL RULES
+1) Follow existing Zed Editor architectural patterns at all times.
+2) Prefer reusing existing commands, actions, and UI components instead of introducing new abstractions.
+3) Do not introduce new dependencies unless explicitly justified.
+4) All behavior must be driven by editor state (active buffer, workspace, pane).
+
+PLANNING & EXECUTION RULES
+5) Planning-first approach:
+   - Research the Zed codebase before proposing changes.
+   - Produce a clear implementation plan before writing code.
+   - Wait for explicit user approval ("implement now") before coding.
+6) Do not refactor unrelated code or perform opportunistic cleanup.
+7) Keep changes minimal, localized, and reversible.
+
+UI & UX RULES
+8) The “SecOps Scan” button must:
+   - Appear only when a real file-backed buffer is open.
+   - Be hidden for non-file buffers (diffs, settings, welcome views, untitled buffers).
+   - Match existing Zed UI patterns (icons, spacing, hover states).
+9) Button placement should prioritize discoverability without cluttering the editor.
+10) The button action should:
+    - Use the current buffer contents, including unsaved edits.
+    - Never read directly from disk if a live buffer exists.
+
+AI CHAT INTEGRATION RULES
+11) Prefer inserting content into the AI chat composer and focusing the chat panel, rather than auto-sending.
+12) The payload format must be:
+    - A short system prompt first.
+    - Followed by the full file contents.
+13) Avoid logging, telemetry, or debug output that includes file contents or sensitive data.
+14) Handle large files safely (size thresholds, truncation, or user confirmation).
+
+EDGE CASES & SAFETY
+15) Gracefully handle:
+    - Large files
+    - Unsaved changes
+    - Read-only files
+    - Binary or non-text buffers
+16) If the action cannot be performed, fail safely with a clear, non-intrusive user message.
+
+TESTING & VALIDATION
+17) Add tests only where the project already supports them.
+18) Prefer unit tests for message construction logic.
+19) Validate behavior manually across supported platforms where possible.
+
+QUALITY BAR
+20) Code must be idiomatic Rust and consistent with existing formatting and style.
+21) Avoid premature optimization.
+22) No breaking changes to existing features.
+
+COMMUNICATION RULES
+23) Clearly document assumptions and trade-offs in comments or planning notes.
+24) Ask for clarification if Zed internals are ambiguous before implementing.

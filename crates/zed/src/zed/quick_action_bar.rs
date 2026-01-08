@@ -2,6 +2,7 @@ mod preview;
 mod repl_menu;
 
 use agent_settings::AgentSettings;
+use agent_ui::{AgentPanel, AgentPanelDelegate};
 use editor::actions::{
     AddSelectionAbove, AddSelectionBelow, CodeActionSource, DuplicateLineDown, GoToDiagnostic,
     GoToHunk, GoToPreviousDiagnostic, GoToPreviousHunk, MoveLineDown, MoveLineUp, SelectAll,
@@ -11,9 +12,9 @@ use editor::actions::{
 use editor::code_context_menus::{CodeContextMenu, ContextMenuOrigin};
 use editor::{Editor, EditorSettings};
 use gpui::{
-    Action, AnchoredPositionMode, ClickEvent, Context, Corner, ElementId, Entity, EventEmitter,
-    FocusHandle, Focusable, InteractiveElement, ParentElement, Render, Styled, Subscription,
-    WeakEntity, Window, anchored, deferred, point,
+    Action, AnchoredPositionMode, AsyncWindowContext, ClickEvent, Context, Corner, ElementId,
+    Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement, ParentElement, Render,
+    Styled, Subscription, WeakEntity, Window, anchored, deferred, point,
 };
 use project::{DisableAiSettings, project_settings::DiagnosticSeverity};
 use search::{BufferSearchBar, buffer_search};
@@ -26,8 +27,133 @@ use vim_mode_setting::{HelixModeSetting, VimModeSetting};
 use workspace::item::ItemBufferKind;
 use workspace::{
     ToolbarItemEvent, ToolbarItemLocation, ToolbarItemView, Workspace, item::ItemHandle,
+    notifications::NotificationId, Toast,
 };
 use zed_actions::{agent::AddSelectionToThread, assistant::InlineAssist, outline::ToggleOutline};
+use zed_actions::agent::SecOpsScan;
+
+const SECOPS_SYSTEM_PROMPT: &str = "You are a security reviewer. Identify vulnerabilities, insecure patterns, secrets, and remediation steps. Keep responses concise and actionable.";
+const SECOPS_WARN_BYTES: usize = 200 * 1024;
+const SECOPS_HARD_LIMIT_BYTES: usize = 1 * 1024 * 1024;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SecOpsPayload {
+    payload: String,
+    truncated: bool,
+    original_bytes: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SecOpsPayloadError {
+    TooLarge { bytes: usize },
+}
+
+fn build_secops_payload(contents: &str) -> Result<SecOpsPayload, SecOpsPayloadError> {
+    let byte_len = contents.as_bytes().len();
+    if byte_len > SECOPS_HARD_LIMIT_BYTES {
+        return Err(SecOpsPayloadError::TooLarge { bytes: byte_len });
+    }
+
+    if byte_len > SECOPS_WARN_BYTES {
+        let truncated_text =
+            String::from_utf8_lossy(&contents.as_bytes()[..SECOPS_WARN_BYTES]).into_owned();
+        let payload = format!(
+            "{SECOPS_SYSTEM_PROMPT}\n\n{truncated_text}\n\n[Content truncated to {SECOPS_WARN_BYTES} bytes]"
+        );
+        return Ok(SecOpsPayload {
+            payload,
+            truncated: true,
+            original_bytes: byte_len,
+        });
+    }
+
+    Ok(SecOpsPayload {
+        payload: format!("{SECOPS_SYSTEM_PROMPT}\n\n{contents}"),
+        truncated: false,
+        original_bytes: byte_len,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SecOpsScanError {
+    AgentUnavailable,
+    NoAgentThread,
+    UnsupportedBuffer,
+    TooLarge { bytes: usize },
+}
+
+impl SecOpsScanError {
+    fn message(&self) -> String {
+        match self {
+            SecOpsScanError::AgentUnavailable => {
+                "Open the Agent panel to use SecOps Scan".to_string()
+            }
+            SecOpsScanError::NoAgentThread => {
+                "Create or select an agent thread to use SecOps Scan".to_string()
+            }
+            SecOpsScanError::UnsupportedBuffer => {
+                "SecOps Scan works only for file-backed text buffers".to_string()
+            }
+            SecOpsScanError::TooLarge { bytes } => format!(
+                "File too large for SecOps Scan ({} bytes > {} bytes limit)",
+                bytes, SECOPS_HARD_LIMIT_BYTES
+            ),
+        }
+    }
+}
+
+fn insert_secops_message(
+    workspace: &mut Workspace,
+    editor: &Entity<Editor>,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) -> Result<SecOpsPayload, SecOpsScanError> {
+    let buffer = editor.read(cx).buffer().clone();
+    if !buffer.read(cx).is_singleton() {
+        return Err(SecOpsScanError::UnsupportedBuffer);
+    }
+
+    let buffer_snapshot = buffer.read(cx).snapshot(cx);
+    let contents = buffer_snapshot.text();
+    let payload = build_secops_payload(&contents).map_err(|err| match err {
+        SecOpsPayloadError::TooLarge { bytes } => SecOpsScanError::TooLarge { bytes },
+    })?;
+
+    let Some(agent_delegate) = <dyn AgentPanelDelegate>::try_global(cx) else {
+        return Err(SecOpsScanError::AgentUnavailable);
+    };
+
+    if workspace.panel::<AgentPanel>(cx).is_some() {
+        workspace.focus_panel::<AgentPanel>(window, cx);
+    }
+
+    if agent_delegate
+        .active_text_thread_editor(workspace, window, cx)
+        .is_none()
+    {
+        if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
+            panel.update(cx, |panel, cx| panel.new_text_thread(window, cx));
+        }
+    }
+
+    let Some(thread_editor) = agent_delegate.active_text_thread_editor(workspace, window, cx) else {
+        return Err(SecOpsScanError::NoAgentThread);
+    };
+
+    thread_editor.update(cx, |thread_editor, cx| {
+        thread_editor.editor().update(cx, |message_editor, cx| {
+            let message_snapshot = message_editor.buffer().read(cx).snapshot(cx);
+            message_editor.move_to_end(&editor::actions::MoveToEnd, window, cx);
+            if !message_snapshot.is_empty() {
+                message_editor.insert("\n\n", window, cx);
+            }
+            message_editor.insert(&payload.payload, window, cx);
+        })
+    });
+
+    workspace.focus_panel::<AgentPanel>(window, cx);
+    Ok(payload)
+}
 
 const MAX_CODE_ACTION_MENU_LINES: u32 = 16;
 
@@ -128,6 +254,7 @@ impl Render for QuickActionBar {
             editor_value.edit_predictions_enabled_at_cursor(cx);
         let supports_minimap = editor_value.supports_minimap(cx);
         let minimap_enabled = supports_minimap && editor_value.minimap().is_some();
+        let buffer_file_backed = editor_value.buffer().read(cx).is_singleton();
         let has_available_code_actions = editor_value.has_available_code_actions();
         let code_action_enabled = editor_value.code_actions_enabled_for_toolbar(cx);
         let focus_handle = editor_value.focus_handle(cx);
@@ -156,12 +283,79 @@ impl Render for QuickActionBar {
             IconName::ZedAssistant,
             false,
             Box::new(InlineAssist::default()),
-            focus_handle,
+            focus_handle.clone(),
             "Inline Assist",
             move |_, window, cx| {
                 window.dispatch_action(Box::new(InlineAssist::default()), cx);
             },
         );
+
+        let secops_focus = focus_handle.clone();
+        let secops_button = buffer_file_backed.then(|| {
+            let workspace = self.workspace.clone();
+            let editor = editor.clone();
+            let toast_id = NotificationId::unique::<SecOpsScan>();
+            QuickActionBarButton::new(
+                "secops-scan-button",
+                IconName::ShieldCheck,
+                false,
+                Box::new(SecOpsScan),
+                secops_focus,
+                "SecOps Scan",
+                move |_, window, cx| {
+                    let workspace = workspace.clone();
+                    let toast_id = toast_id.clone();
+                    let editor = editor.clone();
+                    let _ = workspace.update(cx, |_workspace, cx| {
+                        cx.spawn_in(
+                            window,
+                            move |workspace_weak: WeakEntity<Workspace>, cx: &mut AsyncWindowContext| {
+                                let editor = editor.clone();
+                                let toast_id = toast_id.clone();
+                                let result = if let Some(workspace) = workspace_weak.upgrade() {
+                                    workspace.update_in(cx, |workspace, window, cx| {
+                                        match insert_secops_message(workspace, &editor, window, cx) {
+                                            Ok(payload) => {
+                                                if payload.truncated {
+                                                    workspace.show_toast(
+                                                        Toast::new(
+                                                            toast_id.clone(),
+                                                            format!(
+                                                                "SecOps Scan inserted (truncated to {} KB)",
+                                                                SECOPS_WARN_BYTES / 1024
+                                                            ),
+                                                        )
+                                                        .autohide(),
+                                                        cx,
+                                                    );
+                                                } else {
+                                                    workspace.show_toast(
+                                                        Toast::new(
+                                                            toast_id.clone(),
+                                                            "SecOps Scan inserted into chat composer",
+                                                        )
+                                                        .autohide(),
+                                                        cx,
+                                                    );
+                                                }
+                                            }
+                                            Err(err) => workspace.show_toast(
+                                                Toast::new(toast_id.clone(), err.message()).autohide(),
+                                                cx,
+                                            ),
+                                        }
+                                    })
+                                } else {
+                                    Ok(())
+                                };
+                                async move { result }
+                            },
+                        )
+                        .detach();
+                    });
+                },
+            )
+        });
 
         let code_actions_dropdown = code_action_enabled.then(|| {
             let focus = editor.focus_handle(cx);
@@ -623,6 +817,7 @@ impl Render for QuickActionBar {
         h_flex()
             .id("quick action bar")
             .gap(DynamicSpacing::Base01.rems(cx))
+            .children(secops_button)
             .children(self.render_repl_menu(cx))
             .children(self.render_preview_button(self.workspace.clone(), cx))
             .children(search_button)
@@ -726,5 +921,33 @@ impl ToolbarItemView for QuickActionBar {
             }
         }
         self.get_toolbar_item_location()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secops_payload_without_truncation() {
+        let contents = "safe content";
+        let payload = build_secops_payload(contents).expect("payload");
+        assert!(!payload.truncated);
+        assert!(payload.payload.contains(SECOPS_SYSTEM_PROMPT));
+        assert!(payload.payload.contains(contents));
+    }
+
+    #[test]
+    fn secops_payload_truncates_large_content() {
+        let large = "a".repeat(SECOPS_WARN_BYTES + 10);
+        let payload = build_secops_payload(&large).expect("payload");
+        assert!(payload.truncated);
+        assert!(payload.payload.contains("[Content truncated"));
+        assert_eq!(payload.original_bytes, large.len());
+        assert!(
+            payload.payload.len()
+                < large.len() + SECOPS_SYSTEM_PROMPT.len() + 256,
+            "payload should be bounded after truncation"
+        );
     }
 }
